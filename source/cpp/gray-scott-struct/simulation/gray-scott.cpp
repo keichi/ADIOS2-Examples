@@ -4,6 +4,7 @@
 
 #include "gray-scott.h"
 
+#include <algorithm>
 #include <mpi.h>
 #include <random>
 #include <stddef.h>  // offsetof
@@ -155,7 +156,7 @@ void GrayScott::calc(const std::vector<MemLayout> &d,
                 dd.v = settings.Dv * dd.v;
                 dd.u += calcU(d[i].u, d[i].v);
                 dd.v += calcV(d[i].u, d[i].v);
-                dd.u += settings.noise * uniform_dist(mt_gen);
+                // dd.u += settings.noise * uniform_dist(mt_gen);
                 d2[i].u = d[i].u + dd.u * settings.dt;
                 d2[i].v = d[i].v + dd.v * settings.dt;
             }

@@ -15,11 +15,11 @@ endif()
 
 project(ADIOS2Examples LANGUAGES C CXX VERSION 2.8.0)
 
-include(CheckLanguage)
-check_language(Fortran)
-if(CMAKE_Fortran_COMPILER)
-  enable_language(Fortran)
-endif()
+# include(CheckLanguage)
+# check_language(Fortran)
+# if(CMAKE_Fortran_COMPILER)
+#   enable_language(Fortran)
+# endif()
 
 # Use <PackageName>_ROOT variables if available
 if(POLICY CMP0074)

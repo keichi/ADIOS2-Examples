@@ -4,6 +4,7 @@
 
 #include "../../gray-scott/simulation/gray-scott.h"
 
+#include <algorithm>
 #include <mpi.h>
 #include <random>
 #include <stdexcept> // runtime_error
@@ -147,7 +148,7 @@ void GrayScott::calc(const std::vector<double> &u, const std::vector<double> &v,
                 dv = settings.Dv * laplacian(x, y, z, v);
                 du += calcU(u[i], v[i]);
                 dv += calcV(u[i], v[i]);
-                du += settings.noise * uniform_dist(mt_gen);
+                // du += settings.noise * uniform_dist(mt_gen);
                 u2[i] = u[i] + du * settings.dt;
                 v2[i] = v[i] + dv * settings.dt;
             }
