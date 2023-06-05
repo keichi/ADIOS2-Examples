@@ -8,7 +8,6 @@ add_executable(adios2-gray-scott
   simulation/gray-scott.cpp
   simulation/settings.cpp
   simulation/writer.cpp
-  simulation/restart.cpp
 )
 target_link_libraries(adios2-gray-scott adios2::adios2 MPI::MPI_C)
 install(TARGETS adios2-gray-scott 

@@ -3,39 +3,17 @@
 #include <sstream>
 #include <vector>
 
-#include <adios2.h>
 #include <mpi.h>
 
 #include "../../gray-scott/common/timer.hpp"
 #include "../../gray-scott/simulation/gray-scott.h"
-#include "../../gray-scott/simulation/restart.h"
 #include "../../gray-scott/simulation/writer.h"
 
-void print_io_settings(const adios2::IO &io)
-{
-    std::cout << "Simulation writes data using engine type:              "
-              << io.EngineType() << std::endl;
-    auto ioparams = io.Parameters();
-    std::cout << "IO parameters:  " << std::endl;
-    for (const auto &p : ioparams)
-    {
-        std::cout << "    " << p.first << " = " << p.second << std::endl;
-    }
-}
-
-void print_settings(const Settings &s, int restart_step)
+void print_settings(const Settings &s)
 {
     std::cout << "grid:             " << s.L << "x" << s.L << "x" << s.L
               << std::endl;
-    if (restart_step > 0)
-    {
-        std::cout << "restart:          from step " << restart_step
-                  << std::endl;
-    }
-    else
-    {
-        std::cout << "restart:          no" << std::endl;
-    }
+    std::cout << "restart:          no" << std::endl;
     std::cout << "steps:            " << s.steps << std::endl;
     std::cout << "plotgap:          " << s.plotgap << std::endl;
     std::cout << "F:                " << s.F << std::endl;
@@ -86,26 +64,13 @@ int main(int argc, char **argv)
     GrayScott sim(settings, comm);
     sim.init();
 
-    adios2::ADIOS adios(settings.adios_config, comm);
-    adios2::IO io_main = adios.DeclareIO("SimulationOutput");
-    adios2::IO io_ckpt = adios.DeclareIO("SimulationCheckpoint");
-
-    int restart_step = 0;
-    if (settings.restart)
-    {
-        restart_step = ReadRestart(comm, settings, sim, io_ckpt);
-        io_main.SetParameter("AppendAfterSteps",
-                             std::to_string(restart_step / settings.plotgap));
-    }
-
-    Writer writer_main(settings, sim, io_main);
-    writer_main.open(settings.output, (restart_step > 0));
+    Writer writer_main(settings, sim, MPI_COMM_WORLD);
+    writer_main.open(settings.output);
 
     if (rank == 0)
     {
-        print_io_settings(io_main);
         std::cout << "========================================" << std::endl;
-        print_settings(settings, restart_step);
+        print_settings(settings);
         print_simulator_settings(sim);
         std::cout << "========================================" << std::endl;
     }
@@ -122,7 +87,7 @@ int main(int argc, char **argv)
     log << "step\ttotal_gs\tcompute_gs\twrite_gs" << std::endl;
 #endif
 
-    for (int it = restart_step; it < settings.steps;)
+    for (int it = 0; it < settings.steps;)
     {
 #ifdef ENABLE_TIMERS
         MPI_Barrier(comm);
@@ -149,11 +114,6 @@ int main(int argc, char **argv)
             }
 
             writer_main.write(it, sim);
-        }
-
-        if (settings.checkpoint && (it % settings.checkpoint_freq) == 0)
-        {
-            WriteCkpt(comm, it, settings, sim, io_ckpt);
         }
 
 #ifdef ENABLE_TIMERS

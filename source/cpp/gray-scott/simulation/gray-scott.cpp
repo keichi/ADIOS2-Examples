@@ -5,13 +5,11 @@
 #include "../../gray-scott/simulation/gray-scott.h"
 
 #include <mpi.h>
-#include <random>
 #include <stdexcept> // runtime_error
 #include <vector>
 
 GrayScott::GrayScott(const Settings &settings, MPI_Comm comm)
-: settings(settings), comm(comm), rand_dev(), mt_gen(rand_dev()),
-  uniform_dist(-1.0, 1.0)
+: settings(settings), comm(comm)
 {
 }
 
@@ -147,7 +145,6 @@ void GrayScott::calc(const std::vector<double> &u, const std::vector<double> &v,
                 dv = settings.Dv * laplacian(x, y, z, v);
                 du += calcU(u[i], v[i]);
                 dv += calcV(u[i], v[i]);
-                du += settings.noise * uniform_dist(mt_gen);
                 u2[i] = u[i] + du * settings.dt;
                 v2[i] = v[i] + dv * settings.dt;
             }

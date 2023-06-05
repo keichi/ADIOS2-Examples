@@ -1,152 +1,77 @@
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+
 #include "../../gray-scott/simulation/writer.h"
 
-void define_bpvtk_attribute(const Settings &s, adios2::IO &io)
+Writer::Writer(const Settings &settings, const GrayScott &sim, MPI_Comm comm)
+: settings(settings), fd(0), timestep_offset(0), comm(comm)
 {
-    auto lf_VTKImage = [](const Settings &s, adios2::IO &io) {
-        const std::string extent = "0 " + std::to_string(s.L) + " " + "0 " +
-                                   std::to_string(s.L) + " " + "0 " +
-                                   std::to_string(s.L);
-
-        const std::string imageData = R"(
-        <?xml version="1.0"?>
-        <VTKFile type="ImageData" version="0.1" byte_order="LittleEndian">
-          <ImageData WholeExtent=")" + extent +
-                                      R"(" Origin="0 0 0" Spacing="1 1 1">
-            <Piece Extent=")" + extent +
-                                      R"(">
-              <CellData Scalars="U">
-                  <DataArray Name="U" />
-                  <DataArray Name="V" />
-                  <DataArray Name="TIME">
-                    step
-                  </DataArray>
-              </CellData>
-            </Piece>
-          </ImageData>
-        </VTKFile>)";
-
-        io.DefineAttribute<std::string>("vtk.xml", imageData);
-    };
-
-    if (s.mesh_type == "image")
-    {
-        lf_VTKImage(s, io);
-    }
-    else if (s.mesh_type == "structured")
-    {
-        throw std::invalid_argument(
-            "ERROR: mesh_type=structured not yet "
-            "   supported in settings.json, use mesh_type=image instead\n");
-    }
-    // TODO extend to other formats e.g. structured
 }
 
-Writer::Writer(const Settings &settings, const GrayScott &sim, adios2::IO io)
-: settings(settings), io(io)
+void Writer::open(const std::string &fname)
 {
-    io.DefineAttribute<double>("F", settings.F);
-    io.DefineAttribute<double>("k", settings.k);
-    io.DefineAttribute<double>("dt", settings.dt);
-    io.DefineAttribute<double>("Du", settings.Du);
-    io.DefineAttribute<double>("Dv", settings.Dv);
-    io.DefineAttribute<double>("noise", settings.noise);
-    // define VTK visualization schema as an attribute
-    if (!settings.mesh_type.empty())
+    fd = ::open(fname.c_str(), O_CREAT | O_WRONLY, 0644);
+
+    if (fd == -1)
     {
-        define_bpvtk_attribute(settings, io);
+        perror("open");
+        exit(EXIT_FAILURE);
     }
-
-    // add attributes for Fides
-    io.DefineAttribute<std::string>("Fides_Data_Model", "uniform");
-    double origin[3] = {0.0, 0.0, 0.0};
-    io.DefineAttribute<double>("Fides_Origin", &origin[0], 3);
-    double spacing[3] = {0.1, 0.1, 0.1};
-    io.DefineAttribute<double>("Fides_Spacing", &spacing[0], 3);
-    io.DefineAttribute<std::string>("Fides_Dimension_Variable", "U");
-
-    std::vector<std::string> varList = {"U", "V"};
-    std::vector<std::string> assocList = {"points", "points"};
-    io.DefineAttribute<std::string>("Fides_Variable_List", varList.data(), varList.size());
-    io.DefineAttribute<std::string>("Fides_Variable_Associations", assocList.data(), assocList.size());
-
-    var_u =
-        io.DefineVariable<double>("U", {settings.L, settings.L, settings.L},
-                                  {sim.offset_z, sim.offset_y, sim.offset_x},
-                                  {sim.size_z, sim.size_y, sim.size_x});
-
-    var_v =
-        io.DefineVariable<double>("V", {settings.L, settings.L, settings.L},
-                                  {sim.offset_z, sim.offset_y, sim.offset_x},
-                                  {sim.size_z, sim.size_y, sim.size_x});
-
-    if (settings.adios_memory_selection)
-    {
-        var_u.SetMemorySelection(
-            {{1, 1, 1}, {sim.size_z + 2, sim.size_y + 2, sim.size_x + 2}});
-        var_v.SetMemorySelection(
-            {{1, 1, 1}, {sim.size_z + 2, sim.size_y + 2, sim.size_x + 2}});
-    }
-
-    var_step = io.DefineVariable<int>("step");
 }
 
-void Writer::open(const std::string &fname, bool append)
+void Writer::write(const void *buf, size_t size)
 {
-    adios2::Mode mode = adios2::Mode::Write;
-    if (append)
+    ssize_t bytes_remaining = size;
+    const char *ptr = reinterpret_cast<const char *>(buf);
+    while (bytes_remaining > 0)
     {
-        mode = adios2::Mode::Append;
+        ssize_t bytes_written = ::write(fd, ptr, bytes_remaining);
+
+        if (bytes_written == -1)
+        {
+            perror("write");
+            exit(EXIT_FAILURE);
+        }
+
+        ptr += bytes_written;
+        bytes_remaining -= bytes_written;
     }
-    writer = io.Open(fname, mode);
 }
 
 void Writer::write(int step, const GrayScott &sim)
 {
     if (!sim.size_x || !sim.size_y || !sim.size_z)
     {
-        writer.BeginStep();
-        writer.EndStep();
         return;
     }
 
-    if (settings.adios_memory_selection)
-    {
-        const std::vector<double> &u = sim.u_ghost();
-        const std::vector<double> &v = sim.v_ghost();
+    std::vector<double> u = sim.u_noghost();
+    std::vector<double> v = sim.v_noghost();
 
-        writer.BeginStep();
-        writer.Put<int>(var_step, &step);
-        writer.Put<double>(var_u, u.data());
-        writer.Put<double>(var_v, v.data());
-        writer.EndStep();
-    }
-    else if (settings.adios_span)
-    {
-        writer.BeginStep();
+    // Size of this rank for this timestep
+    size_t this_size = sizeof(double) * u.size() + sizeof(double) * v.size();
+    // Total size of this timestep
+    size_t this_timestep_size = 0;
+    // Offset of this rank from the beginning of the timestep
+    size_t rank_offset = 0;
 
-        writer.Put<int>(var_step, &step);
+    MPI_Exscan(&this_size, &rank_offset, 1, MPI_UNSIGNED_LONG, MPI_SUM, comm);
+    MPI_Allreduce(&this_size, &this_timestep_size, 1, MPI_UNSIGNED_LONG,
+                  MPI_SUM, comm);
 
-        // provide memory directly from adios buffer
-        adios2::Variable<double>::Span u_span = writer.Put<double>(var_u);
-        adios2::Variable<double>::Span v_span = writer.Put<double>(var_v);
+    lseek(fd, timestep_offset + rank_offset, SEEK_SET);
+    write(u.data(), sizeof(double) * u.size());
+    write(v.data(), sizeof(double) * v.size());
 
-        // populate spans
-        sim.u_noghost(u_span.data());
-        sim.v_noghost(v_span.data());
-
-        writer.EndStep();
-    }
-    else
-    {
-        std::vector<double> u = sim.u_noghost();
-        std::vector<double> v = sim.v_noghost();
-
-        writer.BeginStep();
-        writer.Put<int>(var_step, &step);
-        writer.Put<double>(var_u, u.data());
-        writer.Put<double>(var_v, v.data());
-        writer.EndStep();
-    }
+    timestep_offset += this_timestep_size;
 }
 
-void Writer::close() { writer.Close(); }
+void Writer::close()
+{
+    if (fd)
+    {
+        ::close(fd);
+        fd = 0;
+    }
+}

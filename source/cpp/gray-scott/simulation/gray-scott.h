@@ -51,10 +51,6 @@ protected:
     MPI_Datatype xz_face_type;
     MPI_Datatype yz_face_type;
 
-    std::random_device rand_dev;
-    std::mt19937 mt_gen;
-    std::uniform_real_distribution<double> uniform_dist;
-
     // Setup cartesian communicator data types
     void init_mpi();
     // Setup initial conditions
